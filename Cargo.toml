@@ -1,0 +1,7 @@
+[package]
+name = "miami_google_shooter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+macroquad = { version = "0.3.25", features = ["audio"] }
