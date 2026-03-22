@@ -1,7 +1,7 @@
 # Dino Blast
 
 <div align="center">
-  <video src="wastedinmiami.mp4" width="100%" controls></video>
+  <img src="dinoblast.png" width="100%" alt="Dino Blast Screenshot">
 </div>
 
 A high-octane, neon-soaked side-scrolling shooter built with Rust and the [Macroquad](https://macroquad.rs/) game engine.
