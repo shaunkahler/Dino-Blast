@@ -1,6 +1,8 @@
 # Dino Blast
 
-https://github.com/shaunkahler/Dino-Blast/raw/master/wastedinmiami.mp4
+<div align="center">
+  <video src="wastedinmiami.mp4" width="100%" controls></video>
+</div>
 
 A high-octane, neon-soaked side-scrolling shooter built with Rust and the [Macroquad](https://macroquad.rs/) game engine.
 
