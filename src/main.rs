@@ -128,7 +128,7 @@ fn draw_miami_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2) {
     draw_rectangle_rotated(gun_center.x, gun_center.y, 35.0, 8.0, angle, DARKGRAY);
 }
 
-#[macroquad::main("Miami Pixel Google Shooter EXTREME")]
+#[macroquad::main("Dino Blast")]
 async fn main() {
     let mut player = Player {
         pos: vec2(100.0, 300.0),

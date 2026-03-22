@@ -1,4 +1,4 @@
-# Miami Pixel Google Shooter EXTREME
+# Dino Blast
 
 A high-octane, neon-soaked side-scrolling shooter built with Rust and the [Macroquad](https://macroquad.rs/) game engine.
 
