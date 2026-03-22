@@ -1,5 +1,7 @@
 # Dino Blast
 
+<video src="wastedinmiami.mp4" controls="controls" style="max-width: 100%; height: auto;"></video>
+
 A high-octane, neon-soaked side-scrolling shooter built with Rust and the [Macroquad](https://macroquad.rs/) game engine.
 
 ![Miami Vibes](https://img.shields.io/badge/Vibe-Miami%20Vice-pink)
