@@ -105,6 +105,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
+name = "dino-blast"
+version = "0.1.0"
+dependencies = [
+ "macroquad",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,13 +227,6 @@ name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
-
-[[package]]
-name = "miami_google_shooter"
-version = "0.1.0"
-dependencies = [
- "macroquad",
-]
 
 [[package]]
 name = "miniquad"

@@ -1,5 +1,4 @@
 use macroquad::prelude::*;
-use macroquad::audio::{load_sound, play_sound, PlaySoundParams};
 
 const NEON_PINK: Color = Color::new(1.0, 0.0, 0.5, 1.0);
 const NEON_CYAN: Color = Color::new(0.0, 0.9, 1.0, 1.0);
@@ -50,8 +49,8 @@ struct Player {
     health: f32,
     shake_timer: f32,
     is_grounded: bool,
+    jump_count: u32,
     invincibility_timer: f32,
-    muzzle_flash: f32,
     aim_dir: Vec2,
 }
 
@@ -117,19 +116,79 @@ fn draw_rectangle_rotated(x: f32, y: f32, w: f32, h: f32, angle: f32, color: Col
 
 fn draw_miami_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2) {
     let bob = if is_grounded { (anim * 12.0).sin() * 2.0 } else { 0.0 };
+    
+    // Skateboard
+    let board_y = pos.y + 45.0 + bob;
+    draw_rectangle(pos.x - 5.0, board_y, 45.0, 6.0, DARKGRAY);
+    draw_circle(pos.x + 5.0, board_y + 8.0, 4.0, BLACK);
+    draw_circle(pos.x + 30.0, board_y + 8.0, 4.0, BLACK);
+
     draw_rectangle(pos.x + 5.0, pos.y + 30.0 + bob, 10.0, 15.0, NEON_PINK);
     draw_rectangle(pos.x + 20.0, pos.y + 30.0 + bob, 10.0, 15.0, NEON_PINK);
     draw_rectangle(pos.x, pos.y + 10.0 + bob, 35.0, 25.0, NEON_PINK);
     draw_rectangle(pos.x + 10.0, pos.y + 10.0 + bob, 15.0, 20.0, NEON_CYAN);
     draw_rectangle(pos.x + 10.0, pos.y - 5.0 + bob, 15.0, 15.0, Color::new(1.0, 0.8, 0.6, 1.0));
-    draw_rectangle(pos.x + 15.0, pos.y + bob, 10.0, 4.0, BLACK);
+    
+    // Bandana
+    draw_rectangle(pos.x + 10.0, pos.y - 5.0 + bob, 15.0, 4.0, GOOGLE_RED);
+    draw_triangle(vec2(pos.x + 10.0, pos.y - 2.0 + bob), vec2(pos.x + 5.0, pos.y + 3.0 + bob), vec2(pos.x + 10.0, pos.y + 2.0 + bob), GOOGLE_RED);
+
+    draw_rectangle(pos.x + 15.0, pos.y + 1.0 + bob, 10.0, 4.0, BLACK);
     let gun_center = pos + vec2(20.0, 20.0 + bob);
     let angle = aim_dir.y.atan2(aim_dir.x);
     draw_rectangle_rotated(gun_center.x, gun_center.y, 35.0, 8.0, angle, DARKGRAY);
 }
 
+#[derive(PartialEq)]
+enum GameState {
+    Start,
+    Playing,
+    GameOver,
+    EnteringName,
+}
+
+struct HighScore {
+    name: String,
+    score: i32,
+}
+
+fn load_scores() -> Vec<HighScore> {
+    if let Ok(content) = std::fs::read_to_string("high_scores.txt") {
+        content.lines()
+            .filter_map(|l| {
+                let parts: Vec<&str> = l.split(',').collect();
+                if parts.len() == 2 {
+                    Some(HighScore { name: parts[0].to_string(), score: parts[1].parse().unwrap_or(0) })
+                } else { None }
+            })
+            .collect()
+    } else {
+        vec![
+            HighScore { name: "ACE".to_string(), score: 5000 },
+            HighScore { name: "NEO".to_string(), score: 3500 },
+            HighScore { name: "FLY".to_string(), score: 2000 },
+            HighScore { name: "REX".to_string(), score: 1000 },
+            HighScore { name: "BOB".to_string(), score: 500 },
+        ]
+    }
+}
+
+fn save_scores(scores: &[HighScore]) {
+    let content = scores.iter()
+        .map(|s| format!("{},{}", s.name, s.score))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let _ = std::fs::write("high_scores.txt", content);
+}
+
 #[macroquad::main("Dino Blast")]
 async fn main() {
+    set_fullscreen(true);
+    let mut state = GameState::Start;
+    let mut high_scores = load_scores();
+    let mut player_name = String::new();
+    let mut selected_menu = 0;
+
     let mut player = Player {
         pos: vec2(100.0, 300.0),
         vel: vec2(0.0, 0.0),
@@ -140,15 +199,17 @@ async fn main() {
         health: 100.0,
         shake_timer: 0.0,
         is_grounded: false,
+        jump_count: 0,
         invincibility_timer: 0.0,
-        muzzle_flash: 0.0,
         aim_dir: vec2(1.0, 0.0),
     };
 
     let mut enemies: Vec<Enemy> = Vec::new();
+    let mut level = 1;
+    let mut level_timer = 0.0;
+    let mut run_timer = 0.0;
     let mut parallax_x = 0.0;
     let mut spawn_timer = 0.0;
-    let mut game_over = false;
     let mut anim_time = 0.0;
 
     let render_target = render_target(VIRTUAL_WIDTH as u32, VIRTUAL_HEIGHT as u32);
@@ -158,135 +219,185 @@ async fn main() {
         let dt = get_frame_time();
         anim_time += dt;
 
-        if !game_over {
-            player.vel.y += GRAVITY * dt;
-            player.pos += player.vel * dt;
-
-            if player.pos.y >= VIRTUAL_HEIGHT - GROUND_Y - 45.0 {
-                player.pos.y = VIRTUAL_HEIGHT - GROUND_Y - 45.0;
-                player.vel.y = 0.0;
-                player.is_grounded = true;
-            } else {
-                player.is_grounded = false;
-            }
-
-            if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) { player.pos.x -= player.speed * dt; }
-            if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) { player.pos.x += player.speed * dt; }
-            if (is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up)) && player.is_grounded {
-                player.vel.y = JUMP_FORCE;
-            }
-
-            let mouse_pos = mouse_position();
-            let scale = (screen_width() / VIRTUAL_WIDTH).min(screen_height() / VIRTUAL_HEIGHT);
-            let offset_x = (screen_width() - VIRTUAL_WIDTH * scale) / 2.0;
-            let offset_y = (screen_height() - VIRTUAL_HEIGHT * scale) / 2.0;
-            let virtual_mouse = vec2((mouse_pos.0 - offset_x) / scale, (mouse_pos.1 - offset_y) / scale);
-            let gun_center = player.pos + vec2(20.0, 20.0);
-            
-            if is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right) {
-                player.aim_dir = (virtual_mouse - gun_center).normalize();
-            }
-
-            player.shoot_timer -= dt;
-            let is_shooting = is_mouse_button_down(MouseButton::Left) || is_key_down(KeyCode::J) || is_key_down(KeyCode::K);
-            if is_shooting {
-                if player.shoot_timer <= 0.0 {
-                    let is_gmail = rand::gen_range(0, 5) == 0;
-                    player.bullets.push(Bullet {
-                        pos: gun_center + player.aim_dir * 30.0,
-                        vel: player.aim_dir * 1400.0,
-                        lifetime: 1.2,
-                        is_gmail,
-                        from_enemy: false,
-                    });
-                    player.shoot_timer = 0.08;
+        match state {
+            GameState::Start => {
+                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                    state = GameState::Playing;
                 }
-                player.shake_timer = 0.1;
-            } else {
-                player.shake_timer = 0.0;
             }
+            GameState::Playing => {
+                level_timer += dt;
+                run_timer += dt;
+                if level_timer >= 30.0 {
+                    level += 1;
+                    level_timer = 0.0;
+                }
+                let diff_mult = 1.0 + (level - 1) as f32 * 0.25;
 
-            spawn_timer -= dt;
-            if spawn_timer <= 0.0 {
-                let is_heli = rand::gen_range(0, 3) == 0;
-                let (etype, ecolor, y_pos) = if is_heli {
-                    (EnemyType::Heli, WHITE, rand::gen_range(50.0, 300.0))
+                player.vel.y += GRAVITY * dt;
+                player.pos += player.vel * dt;
+
+                if player.pos.y >= VIRTUAL_HEIGHT - GROUND_Y - 45.0 {
+                    player.pos.y = VIRTUAL_HEIGHT - GROUND_Y - 45.0;
+                    player.vel.y = 0.0;
+                    player.is_grounded = true;
+                    player.jump_count = 0;
                 } else {
-                    let colors = [GOOGLE_RED, GOOGLE_GREEN, GOOGLE_BLUE, NEON_YELLOW];
-                    (EnemyType::Dino, colors[rand::gen_range(0, 4)], VIRTUAL_HEIGHT - GROUND_Y - 40.0)
-                };
-                enemies.push(Enemy {
-                    pos: vec2(VIRTUAL_WIDTH, y_pos),
-                    speed: rand::gen_range(200.0, 500.0),
-                    health: if is_heli { 5.0 } else { 3.0 },
-                    color: ecolor,
-                    anim_timer: 0.0,
-                    enemy_type: etype,
-                    shoot_timer: rand::gen_range(1.0, 3.0),
-                });
-                spawn_timer = rand::gen_range(0.8, 2.0);
-            }
-
-            player.bullets.retain_mut(|b| {
-                b.pos += b.vel * dt;
-                b.lifetime -= dt;
-                if b.from_enemy {
-                    let player_rect = Rect::new(player.pos.x, player.pos.y, 40.0, 45.0);
-                    if player_rect.contains(b.pos) && player.invincibility_timer <= 0.0 {
-                        player.health -= 10.0;
-                        player.invincibility_timer = 1.0;
-                        b.lifetime = 0.0;
-                    }
+                    player.is_grounded = false;
                 }
-                b.lifetime > 0.0
-            });
 
-            enemies.retain_mut(|e| {
-                e.pos.x -= e.speed * dt;
-                if e.enemy_type == EnemyType::Heli {
-                    e.pos.y += (anim_time * 2.0).sin() * 2.0;
-                    e.shoot_timer -= dt;
-                    if e.shoot_timer <= 0.0 {
-                        let to_player = (player.pos + vec2(20.0, 20.0) - e.pos).normalize();
+                if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) { player.pos.x -= player.speed * dt; }
+                if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) { player.pos.x += player.speed * dt; }
+                if (is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up)) && player.jump_count < 2 {
+                    player.vel.y = JUMP_FORCE;
+                    player.jump_count += 1;
+                }
+
+                let mouse_pos = mouse_position();
+                let scale = (screen_width() / VIRTUAL_WIDTH).min(screen_height() / VIRTUAL_HEIGHT);
+                let offset_x = (screen_width() - VIRTUAL_WIDTH * scale) / 2.0;
+                let offset_y = (screen_height() - VIRTUAL_HEIGHT * scale) / 2.0;
+                let virtual_mouse = vec2((mouse_pos.0 - offset_x) / scale, (mouse_pos.1 - offset_y) / scale);
+                let gun_center = player.pos + vec2(20.0, 20.0);
+                
+                if is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right) {
+                    player.aim_dir = (virtual_mouse - gun_center).normalize();
+                }
+
+                player.shoot_timer -= dt;
+                let is_shooting = is_mouse_button_down(MouseButton::Left) || is_key_down(KeyCode::J) || is_key_down(KeyCode::K);
+                if is_shooting {
+                    if player.shoot_timer <= 0.0 {
+                        let is_gmail = rand::gen_range(0, 5) == 0;
                         player.bullets.push(Bullet {
-                            pos: e.pos,
-                            vel: to_player * 400.0,
-                            lifetime: 3.0,
-                            is_gmail: false,
-                            from_enemy: true,
+                            pos: gun_center + player.aim_dir * 30.0,
+                            vel: player.aim_dir * 1400.0,
+                            lifetime: 1.2,
+                            is_gmail,
+                            from_enemy: false,
                         });
-                        e.shoot_timer = rand::gen_range(2.0, 4.0);
+                        player.shoot_timer = 0.08;
                     }
+                    player.shake_timer = 0.1;
+                } else {
+                    player.shake_timer = 0.0;
                 }
-                e.anim_timer += dt;
-                for b in &mut player.bullets {
-                    if !b.from_enemy && (b.pos - (e.pos + vec2(20.0, 10.0))).length() < 40.0 {
-                        let damage = if b.is_gmail { 3.0 } else { 1.0 };
-                        e.health -= damage;
-                        b.lifetime = 0.0;
-                        player.score += (damage * 10.0) as i32;
-                    }
-                }
-                let player_rect = Rect::new(player.pos.x, player.pos.y, 40.0, 45.0);
-                let enemy_rect = Rect::new(e.pos.x, e.pos.y, 40.0, 40.0);
-                if player_rect.overlaps(&enemy_rect) && player.invincibility_timer <= 0.0 {
-                    player.health -= 20.0;
-                    player.invincibility_timer = 1.0;
-                }
-                if player.health <= 0.0 { game_over = true; }
-                e.health > 0.0 && e.pos.x > -200.0
-            });
 
-            if player.invincibility_timer > 0.0 { player.invincibility_timer -= dt; }
-            parallax_x += 70.0 * dt;
-        } else {
-            if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::R) {
-                player.pos = vec2(100.0, 300.0);
-                player.health = 100.0;
-                player.score = 0;
-                player.bullets.clear();
-                enemies.clear();
-                game_over = false;
+                spawn_timer -= dt;
+                if spawn_timer <= 0.0 {
+                    let is_heli = rand::gen_range(0, 3) == 0;
+                    let (etype, ecolor, y_pos) = if is_heli {
+                        (EnemyType::Heli, WHITE, rand::gen_range(50.0, 300.0))
+                    } else {
+                        let colors = [GOOGLE_RED, GOOGLE_GREEN, GOOGLE_BLUE, NEON_YELLOW];
+                        (EnemyType::Dino, colors[rand::gen_range(0, 4)], VIRTUAL_HEIGHT - GROUND_Y - 40.0)
+                    };
+                    enemies.push(Enemy {
+                        pos: vec2(VIRTUAL_WIDTH, y_pos),
+                        speed: rand::gen_range(200.0, 500.0) * diff_mult,
+                        health: (if is_heli { 5.0 } else { 3.0 }) * diff_mult,
+                        color: ecolor,
+                        anim_timer: 0.0,
+                        enemy_type: etype,
+                        shoot_timer: rand::gen_range(1.0, 3.0) / diff_mult,
+                    });
+                    spawn_timer = rand::gen_range(0.3, 0.8) / diff_mult;
+                }
+
+                player.bullets.retain_mut(|b| {
+                    b.pos += b.vel * dt;
+                    b.lifetime -= dt;
+                    if b.from_enemy {
+                        let player_rect = Rect::new(player.pos.x, player.pos.y, 40.0, 45.0);
+                        if player_rect.contains(b.pos) && player.invincibility_timer <= 0.0 {
+                            player.health -= 10.0;
+                            player.invincibility_timer = 1.0;
+                            b.lifetime = 0.0;
+                        }
+                    }
+                    b.lifetime > 0.0
+                });
+
+                enemies.retain_mut(|e| {
+                    e.pos.x -= e.speed * dt;
+                    if e.enemy_type == EnemyType::Heli {
+                        e.pos.y += (anim_time * 2.0).sin() * 2.0;
+                        e.shoot_timer -= dt;
+                        if e.shoot_timer <= 0.0 {
+                            let to_player = (player.pos + vec2(20.0, 20.0) - e.pos).normalize();
+                            player.bullets.push(Bullet {
+                                pos: e.pos,
+                                vel: to_player * 400.0,
+                                lifetime: 3.0,
+                                is_gmail: false,
+                                from_enemy: true,
+                            });
+                            e.shoot_timer = rand::gen_range(2.0, 4.0);
+                        }
+                    }
+                    e.anim_timer += dt;
+                    for b in &mut player.bullets {
+                        if !b.from_enemy && (b.pos - (e.pos + vec2(20.0, 10.0))).length() < 40.0 {
+                            let damage = if b.is_gmail { 3.0 } else { 1.0 };
+                            e.health -= damage;
+                            b.lifetime = 0.0;
+                            player.score += (damage * 10.0) as i32;
+                        }
+                    }
+                    let player_rect = Rect::new(player.pos.x, player.pos.y, 40.0, 45.0);
+                    let enemy_rect = Rect::new(e.pos.x, e.pos.y, 40.0, 40.0);
+                    if player_rect.overlaps(&enemy_rect) && player.invincibility_timer <= 0.0 {
+                        player.health -= 20.0;
+                        player.invincibility_timer = 1.0;
+                    }
+                    if player.health <= 0.0 {
+                        if high_scores.iter().any(|s| player.score > s.score) || high_scores.len() < 5 {
+                            state = GameState::EnteringName;
+                            player_name = String::new();
+                        } else {
+                            state = GameState::GameOver;
+                        }
+                        selected_menu = 0;
+                    }
+                    e.health > 0.0 && e.pos.x > -200.0
+                });
+
+                if player.invincibility_timer > 0.0 { player.invincibility_timer -= dt; }
+                parallax_x += 70.0 * dt;
+            }
+            GameState::EnteringName => {
+                while let Some(c) = get_char_pressed() {
+                    if player_name.len() < 3 && c.is_alphabetic() {
+                        player_name.push(c.to_ascii_uppercase());
+                    }
+                }
+                if is_key_pressed(KeyCode::Backspace) { player_name.pop(); }
+                if is_key_pressed(KeyCode::Enter) && player_name.len() == 3 {
+                    high_scores.push(HighScore { name: player_name.clone(), score: player.score });
+                    high_scores.sort_by(|a, b| b.score.cmp(&a.score));
+                    high_scores.truncate(5);
+                    save_scores(&high_scores);
+                    state = GameState::GameOver;
+                }
+            }
+            GameState::GameOver => {
+                if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) { selected_menu = 0; }
+                if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) { selected_menu = 1; }
+                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                    if selected_menu == 0 {
+                        player.pos = vec2(100.0, 300.0);
+                        player.health = 100.0;
+                        player.score = 0;
+                        player.bullets.clear();
+                        enemies.clear();
+                        level = 1;
+                        level_timer = 0.0;
+                        run_timer = 0.0;
+                        state = GameState::Playing;
+                    } else {
+                        std::process::exit(0);
+                    }
+                }
             }
         }
 
@@ -329,18 +440,52 @@ async fn main() {
             }
         }
 
-        if !game_over && (player.invincibility_timer <= 0.0 || (player.invincibility_timer * 12.0) as i32 % 2 == 0) {
+        if state == GameState::Playing && (player.invincibility_timer <= 0.0 || (player.invincibility_timer * 12.0) as i32 % 2 == 0) {
             draw_miami_guy(player.pos + camera_offset, anim_time, player.is_grounded, player.aim_dir);
         }
 
-        if game_over {
-            draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.5));
-            draw_text("WASTED IN MIAMI", VIRTUAL_WIDTH/2.0 - 180.0, VIRTUAL_HEIGHT/2.0, 50.0, RED);
+        match state {
+            GameState::Start => {
+                draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.7));
+                draw_text("DINO BLAST", VIRTUAL_WIDTH/2.0 - 180.0, 150.0, 80.0, NEON_PINK);
+                draw_text("PRESS START (ENTER)", VIRTUAL_WIDTH/2.0 - 150.0, 220.0, 30.0, WHITE);
+                
+                draw_text("HIGH SCORES", VIRTUAL_WIDTH/2.0 - 80.0, 300.0, 32.0, NEON_CYAN);
+                for (i, s) in high_scores.iter().enumerate() {
+                    draw_text(&format!("{}. {} - {:06}", i + 1, s.name, s.score), VIRTUAL_WIDTH/2.0 - 100.0, 350.0 + i as f32 * 40.0, 28.0, WHITE);
+                }
+            }
+            GameState::EnteringName => {
+                draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.8));
+                draw_text("NEW HIGH SCORE!", VIRTUAL_WIDTH/2.0 - 180.0, 200.0, 50.0, NEON_YELLOW);
+                draw_text(&format!("SCORE: {:06}", player.score), VIRTUAL_WIDTH/2.0 - 100.0, 260.0, 32.0, WHITE);
+                draw_text("ENTER NAME (3 LETTERS):", VIRTUAL_WIDTH/2.0 - 180.0, 350.0, 30.0, WHITE);
+                draw_text(&player_name, VIRTUAL_WIDTH/2.0 - 40.0, 420.0, 60.0, NEON_CYAN);
+            }
+            GameState::GameOver => {
+                draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.8));
+                draw_text("WASTED IN MIAMI", VIRTUAL_WIDTH/2.0 - 220.0, 200.0, 60.0, RED);
+                draw_text(&format!("FINAL LEVEL: {}", level), VIRTUAL_WIDTH/2.0 - 100.0, 260.0, 30.0, WHITE);
+                
+                let try_color = if selected_menu == 0 { NEON_YELLOW } else { WHITE };
+                let exit_color = if selected_menu == 1 { NEON_YELLOW } else { WHITE };
+                draw_text("TRY AGAIN", VIRTUAL_WIDTH/2.0 - 80.0, 350.0, 40.0, try_color);
+                draw_text("EXIT", VIRTUAL_WIDTH/2.0 - 40.0, 410.0, 40.0, exit_color);
+            }
+            _ => {}
         }
 
-        draw_rectangle(15.0, 15.0, 260.0, 130.0, Color::new(0.0, 0.0, 0.0, 0.8));
-        draw_text(&format!("G-SCORE: {:06}", player.score), 25.0, 80.0, 32.0, WHITE);
-        draw_rectangle(90.0, 102.0, 160.0 * (player.health / 100.0), 18.0, GOOGLE_RED);
+        if state == GameState::Playing {
+            draw_rectangle(15.0, 15.0, 260.0, 200.0, Color::new(0.0, 0.0, 0.0, 0.8));
+            draw_text(&format!("G-SCORE: {:06}", player.score), 25.0, 50.0, 32.0, WHITE);
+            draw_text(&format!("LEVEL: {}", level), 25.0, 90.0, 32.0, NEON_CYAN);
+            
+            let mins = (run_timer / 60.0) as i32;
+            let secs = (run_timer % 60.0) as i32;
+            draw_text(&format!("TIME: {:02}:{:02}", mins, secs), 25.0, 130.0, 32.0, WHITE);
+            
+            draw_rectangle(90.0, 162.0, 160.0 * (player.health / 100.0), 18.0, GOOGLE_RED);
+        }
 
         set_default_camera();
         let scale = (screen_width() / VIRTUAL_WIDTH).min(screen_height() / VIRTUAL_HEIGHT);
