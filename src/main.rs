@@ -51,6 +51,7 @@ struct Player {
     is_grounded: bool,
     jump_count: u32,
     invincibility_timer: f32,
+    powerup_timer: f32,
     aim_dir: Vec2,
 }
 
@@ -114,24 +115,32 @@ fn draw_rectangle_rotated(x: f32, y: f32, w: f32, h: f32, angle: f32, color: Col
     draw_triangle(p1, p3, p4, color);
 }
 
-fn draw_miami_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2) {
+fn draw_miami_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2, powerup_timer: f32) {
     let bob = if is_grounded { (anim * 12.0).sin() * 2.0 } else { 0.0 };
     
+    let (body_color, shirt_color, bandana_color) = if powerup_timer > 0.0 {
+        let t = (anim * 20.0) as usize;
+        let colors = [NEON_PINK, NEON_CYAN, NEON_YELLOW, GOOGLE_GREEN, GOOGLE_RED];
+        (colors[t % 5], colors[(t + 1) % 5], colors[(t + 2) % 5])
+    } else {
+        (NEON_PINK, NEON_CYAN, GOOGLE_RED)
+    };
+
     // Skateboard
     let board_y = pos.y + 45.0 + bob;
     draw_rectangle(pos.x - 5.0, board_y, 45.0, 6.0, DARKGRAY);
     draw_circle(pos.x + 5.0, board_y + 8.0, 4.0, BLACK);
     draw_circle(pos.x + 30.0, board_y + 8.0, 4.0, BLACK);
 
-    draw_rectangle(pos.x + 5.0, pos.y + 30.0 + bob, 10.0, 15.0, NEON_PINK);
-    draw_rectangle(pos.x + 20.0, pos.y + 30.0 + bob, 10.0, 15.0, NEON_PINK);
-    draw_rectangle(pos.x, pos.y + 10.0 + bob, 35.0, 25.0, NEON_PINK);
-    draw_rectangle(pos.x + 10.0, pos.y + 10.0 + bob, 15.0, 20.0, NEON_CYAN);
+    draw_rectangle(pos.x + 5.0, pos.y + 30.0 + bob, 10.0, 15.0, body_color);
+    draw_rectangle(pos.x + 20.0, pos.y + 30.0 + bob, 10.0, 15.0, body_color);
+    draw_rectangle(pos.x, pos.y + 10.0 + bob, 35.0, 25.0, body_color);
+    draw_rectangle(pos.x + 10.0, pos.y + 10.0 + bob, 15.0, 20.0, shirt_color);
     draw_rectangle(pos.x + 10.0, pos.y - 5.0 + bob, 15.0, 15.0, Color::new(1.0, 0.8, 0.6, 1.0));
     
     // Bandana
-    draw_rectangle(pos.x + 10.0, pos.y - 5.0 + bob, 15.0, 4.0, GOOGLE_RED);
-    draw_triangle(vec2(pos.x + 10.0, pos.y - 2.0 + bob), vec2(pos.x + 5.0, pos.y + 3.0 + bob), vec2(pos.x + 10.0, pos.y + 2.0 + bob), GOOGLE_RED);
+    draw_rectangle(pos.x + 10.0, pos.y - 5.0 + bob, 15.0, 4.0, bandana_color);
+    draw_triangle(vec2(pos.x + 10.0, pos.y - 2.0 + bob), vec2(pos.x + 5.0, pos.y + 3.0 + bob), vec2(pos.x + 10.0, pos.y + 2.0 + bob), bandana_color);
 
     draw_rectangle(pos.x + 15.0, pos.y + 1.0 + bob, 10.0, 4.0, BLACK);
     let gun_center = pos + vec2(20.0, 20.0 + bob);
@@ -186,7 +195,8 @@ async fn main() {
     set_fullscreen(true);
     let mut state = GameState::Start;
     let mut high_scores = load_scores();
-    let mut player_name = String::new();
+    let mut player_name = vec!['A', 'A', 'A'];
+    let mut name_index = 0;
     let mut selected_menu = 0;
 
     let mut player = Player {
@@ -201,10 +211,13 @@ async fn main() {
         is_grounded: false,
         jump_count: 0,
         invincibility_timer: 0.0,
+        powerup_timer: 0.0,
         aim_dir: vec2(1.0, 0.0),
     };
 
     let mut enemies: Vec<Enemy> = Vec::new();
+    let mut power_up: Option<Vec2> = None;
+    let mut power_up_spawned_this_level = false;
     let mut level = 1;
     let mut level_timer = 0.0;
     let mut run_timer = 0.0;
@@ -228,10 +241,30 @@ async fn main() {
             GameState::Playing => {
                 level_timer += dt;
                 run_timer += dt;
+                if player.powerup_timer > 0.0 { player.powerup_timer -= dt; }
+
                 if level_timer >= 30.0 {
                     level += 1;
                     level_timer = 0.0;
+                    power_up_spawned_this_level = false;
                 }
+
+                if !power_up_spawned_this_level && level_timer > 15.0 {
+                    power_up = Some(vec2(VIRTUAL_WIDTH, VIRTUAL_HEIGHT / 2.0));
+                    power_up_spawned_this_level = true;
+                }
+
+                if let Some(ref mut pu_pos) = power_up {
+                    pu_pos.x -= 200.0 * dt;
+                    let player_rect = Rect::new(player.pos.x, player.pos.y, 40.0, 45.0);
+                    if player_rect.overlaps(&Rect::new(pu_pos.x, pu_pos.y, 30.0, 30.0)) {
+                        player.powerup_timer = 7.0;
+                        power_up = None;
+                    } else if pu_pos.x < -100.0 {
+                        power_up = None;
+                    }
+                }
+
                 let diff_mult = 1.0 + (level - 1) as f32 * 0.25;
 
                 player.vel.y += GRAVITY * dt;
@@ -248,7 +281,12 @@ async fn main() {
 
                 if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) { player.pos.x -= player.speed * dt; }
                 if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) { player.pos.x += player.speed * dt; }
-                if (is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up)) && player.jump_count < 2 {
+
+                player.pos.x = player.pos.x.clamp(0.0, VIRTUAL_WIDTH - 40.0);
+                if player.pos.y < 0.0 {
+                    player.pos.y = 0.0;
+                    player.vel.y = 0.0;
+                }                if (is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up)) && player.jump_count < 2 {
                     player.vel.y = JUMP_FORCE;
                     player.jump_count += 1;
                 }
@@ -269,14 +307,29 @@ async fn main() {
                 if is_shooting {
                     if player.shoot_timer <= 0.0 {
                         let is_gmail = rand::gen_range(0, 5) == 0;
-                        player.bullets.push(Bullet {
-                            pos: gun_center + player.aim_dir * 30.0,
-                            vel: player.aim_dir * 1400.0,
-                            lifetime: 1.2,
-                            is_gmail,
-                            from_enemy: false,
-                        });
-                        player.shoot_timer = 0.08;
+                        if player.powerup_timer > 0.0 {
+                            for i in -1..=1 {
+                                let offset_angle = i as f32 * 0.15;
+                                let dir = rotate_vec2(player.aim_dir, offset_angle);
+                                player.bullets.push(Bullet {
+                                    pos: gun_center + dir * 30.0,
+                                    vel: dir * 1600.0,
+                                    lifetime: 1.2,
+                                    is_gmail,
+                                    from_enemy: false,
+                                });
+                            }
+                            player.shoot_timer = 0.04;
+                        } else {
+                            player.bullets.push(Bullet {
+                                pos: gun_center + player.aim_dir * 30.0,
+                                vel: player.aim_dir * 1400.0,
+                                lifetime: 1.2,
+                                is_gmail,
+                                from_enemy: false,
+                            });
+                            player.shoot_timer = 0.08;
+                        }
                     }
                     player.shake_timer = 0.1;
                 } else {
@@ -353,7 +406,8 @@ async fn main() {
                     if player.health <= 0.0 {
                         if high_scores.iter().any(|s| player.score > s.score) || high_scores.len() < 5 {
                             state = GameState::EnteringName;
-                            player_name = String::new();
+                            player_name = vec!['A', 'A', 'A'];
+                            name_index = 0;
                         } else {
                             state = GameState::GameOver;
                         }
@@ -366,14 +420,24 @@ async fn main() {
                 parallax_x += 70.0 * dt;
             }
             GameState::EnteringName => {
-                while let Some(c) = get_char_pressed() {
-                    if player_name.len() < 3 && c.is_alphabetic() {
-                        player_name.push(c.to_ascii_uppercase());
-                    }
+                if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
+                    let c = player_name[name_index];
+                    player_name[name_index] = if c == 'Z' { 'A' } else { ((c as u8) + 1) as char };
                 }
-                if is_key_pressed(KeyCode::Backspace) { player_name.pop(); }
-                if is_key_pressed(KeyCode::Enter) && player_name.len() == 3 {
-                    high_scores.push(HighScore { name: player_name.clone(), score: player.score });
+                if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
+                    let c = player_name[name_index];
+                    player_name[name_index] = if c == 'A' { 'Z' } else { ((c as u8) - 1) as char };
+                }
+                if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
+                    name_index = (name_index + 1) % 3;
+                }
+                if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
+                    name_index = (name_index + 2) % 3;
+                }
+                
+                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                    let name_str: String = player_name.iter().collect();
+                    high_scores.push(HighScore { name: name_str, score: player.score });
                     high_scores.sort_by(|a, b| b.score.cmp(&a.score));
                     high_scores.truncate(5);
                     save_scores(&high_scores);
@@ -393,6 +457,9 @@ async fn main() {
                         level = 1;
                         level_timer = 0.0;
                         run_timer = 0.0;
+                        power_up = None;
+                        power_up_spawned_this_level = false;
+                        player.powerup_timer = 0.0;
                         state = GameState::Playing;
                     } else {
                         std::process::exit(0);
@@ -440,8 +507,15 @@ async fn main() {
             }
         }
 
+        if let Some(pu_pos) = power_up {
+            let t = (anim_time * 10.0).sin() * 0.5 + 0.5;
+            let color = Color::new(t, 1.0 - t, 1.0, 1.0);
+            draw_poly(pu_pos.x + 15.0, pu_pos.y + 15.0, 8, 15.0, anim_time * 100.0, color);
+            draw_text("POW", pu_pos.x - 5.0, pu_pos.y + 10.0, 20.0, WHITE);
+        }
+
         if state == GameState::Playing && (player.invincibility_timer <= 0.0 || (player.invincibility_timer * 12.0) as i32 % 2 == 0) {
-            draw_miami_guy(player.pos + camera_offset, anim_time, player.is_grounded, player.aim_dir);
+            draw_miami_guy(player.pos + camera_offset, anim_time, player.is_grounded, player.aim_dir, player.powerup_timer);
         }
 
         match state {
@@ -459,8 +533,16 @@ async fn main() {
                 draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.8));
                 draw_text("NEW HIGH SCORE!", VIRTUAL_WIDTH/2.0 - 180.0, 200.0, 50.0, NEON_YELLOW);
                 draw_text(&format!("SCORE: {:06}", player.score), VIRTUAL_WIDTH/2.0 - 100.0, 260.0, 32.0, WHITE);
-                draw_text("ENTER NAME (3 LETTERS):", VIRTUAL_WIDTH/2.0 - 180.0, 350.0, 30.0, WHITE);
-                draw_text(&player_name, VIRTUAL_WIDTH/2.0 - 40.0, 420.0, 60.0, NEON_CYAN);
+                draw_text("USE ARROWS TO SELECT NAME:", VIRTUAL_WIDTH/2.0 - 180.0, 350.0, 30.0, WHITE);
+                
+                for i in 0..3 {
+                    let x = VIRTUAL_WIDTH/2.0 - 60.0 + i as f32 * 50.0;
+                    let color = if i == name_index { NEON_CYAN } else { WHITE };
+                    draw_text(&player_name[i].to_string(), x, 420.0, 60.0, color);
+                    if i == name_index {
+                        draw_rectangle(x, 430.0, 30.0, 4.0, NEON_CYAN);
+                    }
+                }
             }
             GameState::GameOver => {
                 draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.8));
