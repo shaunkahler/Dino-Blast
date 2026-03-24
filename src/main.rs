@@ -115,7 +115,7 @@ fn draw_rectangle_rotated(x: f32, y: f32, w: f32, h: f32, angle: f32, color: Col
     draw_triangle(p1, p3, p4, color);
 }
 
-fn draw_miami_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2, powerup_timer: f32) {
+fn draw_dino_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2, powerup_timer: f32) {
     let bob = if is_grounded { (anim * 12.0).sin() * 2.0 } else { 0.0 };
     
     let (body_color, shirt_color, bandana_color) = if powerup_timer > 0.0 {
@@ -515,7 +515,7 @@ async fn main() {
         }
 
         if state == GameState::Playing && (player.invincibility_timer <= 0.0 || (player.invincibility_timer * 12.0) as i32 % 2 == 0) {
-            draw_miami_guy(player.pos + camera_offset, anim_time, player.is_grounded, player.aim_dir, player.powerup_timer);
+            draw_dino_guy(player.pos + camera_offset, anim_time, player.is_grounded, player.aim_dir, player.powerup_timer);
         }
 
         match state {
@@ -546,13 +546,18 @@ async fn main() {
             }
             GameState::GameOver => {
                 draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.8));
-                draw_text("WASTED IN MIAMI", VIRTUAL_WIDTH/2.0 - 220.0, 200.0, 60.0, RED);
-                draw_text(&format!("FINAL LEVEL: {}", level), VIRTUAL_WIDTH/2.0 - 100.0, 260.0, 30.0, WHITE);
+                draw_text("DINO BLAST", VIRTUAL_WIDTH/2.0 - 180.0, 100.0, 80.0, RED);
+                draw_text(&format!("FINAL SCORE: {:06} | LEVEL: {}", player.score, level), VIRTUAL_WIDTH/2.0 - 240.0, 160.0, 30.0, WHITE);
+
+                draw_text("HIGH SCORES", VIRTUAL_WIDTH/2.0 - 80.0, 220.0, 32.0, NEON_CYAN);
+                for (i, s) in high_scores.iter().enumerate() {
+                    draw_text(&format!("{}. {} - {:06}", i + 1, s.name, s.score), VIRTUAL_WIDTH/2.0 - 100.0, 270.0 + i as f32 * 40.0, 28.0, WHITE);
+                }
                 
                 let try_color = if selected_menu == 0 { NEON_YELLOW } else { WHITE };
                 let exit_color = if selected_menu == 1 { NEON_YELLOW } else { WHITE };
-                draw_text("TRY AGAIN", VIRTUAL_WIDTH/2.0 - 80.0, 350.0, 40.0, try_color);
-                draw_text("EXIT", VIRTUAL_WIDTH/2.0 - 40.0, 410.0, 40.0, exit_color);
+                draw_text("TRY AGAIN", VIRTUAL_WIDTH/2.0 - 80.0, 520.0, 40.0, try_color);
+                draw_text("EXIT", VIRTUAL_WIDTH/2.0 - 40.0, 580.0, 40.0, exit_color);
             }
             _ => {}
         }
