@@ -27,11 +27,13 @@ struct Bullet {
 enum EnemyType {
     Dino,
     Heli,
+    FlippingDino,
 }
 
 struct Enemy {
     pos: Vec2,
     speed: f32,
+    y_vel: f32,
     health: f32,
     color: Color,
     anim_timer: f32,
@@ -75,15 +77,36 @@ fn draw_heli(pos: Vec2, size: f32, color: Color, anim: f32) {
     draw_rectangle(pos.x - size * 0.5, pos.y, 5.0, size * 0.7, color);
 }
 
-fn draw_chrome_dino(pos: Vec2, size: f32, color: Color, anim: f32) {
+fn rotate_around_pivot(v: Vec2, pivot: Vec2, angle: f32) -> Vec2 {
+    let shifted = v - pivot;
+    let rotated = rotate_vec2(shifted, angle);
+    rotated + pivot
+}
+
+fn draw_chrome_dino(pos: Vec2, size: f32, color: Color, anim: f32, angle: f32) {
     let leg_offset = (anim * 15.0).sin() * 5.0;
-    draw_rectangle(pos.x - 5.0, pos.y + size * 0.5, 10.0, 10.0, color);
-    draw_rectangle(pos.x, pos.y, size * 0.8, size, color);
-    draw_rectangle(pos.x + size * 0.3, pos.y - size * 0.4, size, size * 0.6, color);
-    draw_rectangle(pos.x + size * 0.6, pos.y - size * 0.3, 5.0, 5.0, WHITE);
-    draw_rectangle(pos.x + size * 0.7, pos.y + size * 0.3, 8.0, 4.0, color);
-    draw_rectangle(pos.x + 5.0, pos.y + size, 8.0, 12.0 + leg_offset, color);
-    draw_rectangle(pos.x + size * 0.5, pos.y + size, 8.0, 12.0 - leg_offset, color);
+    let pivot = pos + vec2(size * 0.5, size * 0.5);
+
+    let mut draw_rect = |x: f32, y: f32, w: f32, h: f32, c: Color| {
+        if angle == 0.0 {
+            draw_rectangle(x, y, w, h, c);
+        } else {
+            let p1 = rotate_around_pivot(vec2(x, y), pivot, angle);
+            let p2 = rotate_around_pivot(vec2(x + w, y), pivot, angle);
+            let p3 = rotate_around_pivot(vec2(x + w, y + h), pivot, angle);
+            let p4 = rotate_around_pivot(vec2(x, y + h), pivot, angle);
+            draw_triangle(p1, p2, p3, c);
+            draw_triangle(p1, p3, p4, c);
+        }
+    };
+
+    draw_rect(pos.x - 5.0, pos.y + size * 0.5, 10.0, 10.0, color);
+    draw_rect(pos.x, pos.y, size * 0.8, size, color);
+    draw_rect(pos.x + size * 0.3, pos.y - size * 0.4, size, size * 0.6, color);
+    draw_rect(pos.x + size * 0.6, pos.y - size * 0.3, 5.0, 5.0, WHITE);
+    draw_rect(pos.x + size * 0.7, pos.y + size * 0.3, 8.0, 4.0, color);
+    draw_rect(pos.x + 5.0, pos.y + size, 8.0, 12.0 + leg_offset, color);
+    draw_rect(pos.x + size * 0.5, pos.y + size, 8.0, 12.0 - leg_offset, color);
 }
 
 fn draw_neon_palm(x: f32, y: f32) {
@@ -339,15 +362,23 @@ async fn main() {
                 spawn_timer -= dt;
                 if spawn_timer <= 0.0 {
                     let is_heli = rand::gen_range(0, 3) == 0;
-                    let (etype, ecolor, y_pos) = if is_heli {
-                        (EnemyType::Heli, WHITE, rand::gen_range(50.0, 300.0))
-                    } else {
+                    let mut etype = if is_heli { EnemyType::Heli } else { EnemyType::Dino };
+                    let mut ecolor = if is_heli { WHITE } else {
                         let colors = [GOOGLE_RED, GOOGLE_GREEN, GOOGLE_BLUE, NEON_YELLOW];
-                        (EnemyType::Dino, colors[rand::gen_range(0, 4)], VIRTUAL_HEIGHT - GROUND_Y - 40.0)
+                        colors[rand::gen_range(0, 4)]
                     };
+                    let mut y_pos = if is_heli { rand::gen_range(50.0, 300.0) } else { VIRTUAL_HEIGHT - GROUND_Y - 40.0 };
+
+                    if level >= 1 && rand::gen_range(0, 100) < (level) * 10 + 5 {
+                        etype = EnemyType::FlippingDino;
+                        ecolor = NEON_YELLOW;
+                        y_pos = VIRTUAL_HEIGHT - GROUND_Y - 40.0;
+                    }
+
                     enemies.push(Enemy {
                         pos: vec2(VIRTUAL_WIDTH, y_pos),
                         speed: rand::gen_range(200.0, 500.0) * diff_mult,
+                        y_vel: 0.0,
                         health: (if is_heli { 5.0 } else { 3.0 }) * diff_mult,
                         color: ecolor,
                         anim_timer: 0.0,
@@ -373,20 +404,35 @@ async fn main() {
 
                 enemies.retain_mut(|e| {
                     e.pos.x -= e.speed * dt;
-                    if e.enemy_type == EnemyType::Heli {
-                        e.pos.y += (anim_time * 2.0).sin() * 2.0;
-                        e.shoot_timer -= dt;
-                        if e.shoot_timer <= 0.0 {
-                            let to_player = (player.pos + vec2(20.0, 20.0) - e.pos).normalize();
-                            player.bullets.push(Bullet {
-                                pos: e.pos,
-                                vel: to_player * 400.0,
-                                lifetime: 3.0,
-                                is_gmail: false,
-                                from_enemy: true,
-                            });
-                            e.shoot_timer = rand::gen_range(2.0, 4.0);
+                    match e.enemy_type {
+                        EnemyType::Heli => {
+                            e.pos.y += (anim_time * 2.0).sin() * 2.0;
+                            e.shoot_timer -= dt;
+                            if e.shoot_timer <= 0.0 {
+                                let to_player = (player.pos + vec2(20.0, 20.0) - e.pos).normalize();
+                                player.bullets.push(Bullet {
+                                    pos: e.pos,
+                                    vel: to_player * 400.0,
+                                    lifetime: 3.0,
+                                    is_gmail: false,
+                                    from_enemy: true,
+                                });
+                                e.shoot_timer = rand::gen_range(2.0, 4.0);
+                            }
                         }
+                        EnemyType::FlippingDino => {
+                            e.y_vel += GRAVITY * dt;
+                            e.pos.y += e.y_vel * dt;
+
+                            if e.pos.y >= VIRTUAL_HEIGHT - GROUND_Y - 40.0 {
+                                e.pos.y = VIRTUAL_HEIGHT - GROUND_Y - 40.0;
+                                e.y_vel = 0.0;
+                                if rand::gen_range(0, 30) == 0 {
+                                    e.y_vel = -rand::gen_range(700.0, 1000.0);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                     e.anim_timer += dt;
                     for b in &mut player.bullets {
@@ -417,7 +463,7 @@ async fn main() {
                 });
 
                 if player.invincibility_timer > 0.0 { player.invincibility_timer -= dt; }
-                parallax_x += 70.0 * dt;
+                parallax_x += 120.0 * dt;
             }
             GameState::EnteringName => {
                 if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
@@ -486,8 +532,10 @@ async fn main() {
         let camera_offset = if player.shake_timer > 0.0 { vec2(rand::gen_range(-6.0, 6.0), rand::gen_range(-6.0, 6.0)) } else { vec2(0.0, 0.0) };
 
         draw_circle(VIRTUAL_WIDTH * 0.8 + camera_offset.x, VIRTUAL_HEIGHT * 0.2 + camera_offset.y, 80.0, NEON_YELLOW);
+        
+        let tree_spacing = (VIRTUAL_WIDTH + 400.0) / 8.0;
         for i in 0..8 {
-            let x = (i as f32 * 350.0 - parallax_x) % (VIRTUAL_WIDTH + 350.0);
+            let x = (i as f32 * tree_spacing - parallax_x).rem_euclid(VIRTUAL_WIDTH + 400.0) - 200.0;
             draw_neon_palm(x, VIRTUAL_HEIGHT - GROUND_Y);
         }
 
@@ -502,8 +550,16 @@ async fn main() {
 
         for e in &enemies {
             match e.enemy_type {
-                EnemyType::Dino => draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer),
+                EnemyType::Dino => draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer, 0.0),
                 EnemyType::Heli => draw_heli(e.pos + camera_offset, 40.0, e.color, e.anim_timer),
+                EnemyType::FlippingDino => {
+                    let rotation = if e.pos.y < VIRTUAL_HEIGHT - GROUND_Y - 40.0 {
+                        e.anim_timer * 20.0
+                    } else {
+                        0.0
+                    };
+                    draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer, rotation);
+                }
             }
         }
 
