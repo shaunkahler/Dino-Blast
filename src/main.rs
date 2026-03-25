@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use macroquad::audio::{load_sound, play_sound, stop_sound, PlaySoundParams};
 
 const NEON_PINK: Color = Color::new(1.0, 0.0, 0.5, 1.0);
 const NEON_CYAN: Color = Color::new(0.0, 0.9, 1.0, 1.0);
@@ -21,6 +22,14 @@ struct Bullet {
     lifetime: f32,
     is_gmail: bool,
     from_enemy: bool,
+}
+
+struct Particle {
+    pos: Vec2,
+    vel: Vec2,
+    life: f32,
+    color: Color,
+    size: f32,
 }
 
 #[derive(PartialEq)]
@@ -83,11 +92,11 @@ fn rotate_around_pivot(v: Vec2, pivot: Vec2, angle: f32) -> Vec2 {
     rotated + pivot
 }
 
-fn draw_chrome_dino(pos: Vec2, size: f32, color: Color, anim: f32, angle: f32) {
+fn draw_chrome_dino(pos: Vec2, size: f32, color: Color, anim: f32, angle: f32, eye_color: Option<Color>) {
     let leg_offset = (anim * 15.0).sin() * 5.0;
     let pivot = pos + vec2(size * 0.5, size * 0.5);
 
-    let mut draw_rect = |x: f32, y: f32, w: f32, h: f32, c: Color| {
+    let draw_rect = |x: f32, y: f32, w: f32, h: f32, c: Color| {
         if angle == 0.0 {
             draw_rectangle(x, y, w, h, c);
         } else {
@@ -103,7 +112,7 @@ fn draw_chrome_dino(pos: Vec2, size: f32, color: Color, anim: f32, angle: f32) {
     draw_rect(pos.x - 5.0, pos.y + size * 0.5, 10.0, 10.0, color);
     draw_rect(pos.x, pos.y, size * 0.8, size, color);
     draw_rect(pos.x + size * 0.3, pos.y - size * 0.4, size, size * 0.6, color);
-    draw_rect(pos.x + size * 0.6, pos.y - size * 0.3, 5.0, 5.0, WHITE);
+    draw_rect(pos.x + size * 0.6, pos.y - size * 0.3, 5.0, 5.0, eye_color.unwrap_or(WHITE));
     draw_rect(pos.x + size * 0.7, pos.y + size * 0.3, 8.0, 4.0, color);
     draw_rect(pos.x + 5.0, pos.y + size, 8.0, 12.0 + leg_offset, color);
     draw_rect(pos.x + size * 0.5, pos.y + size, 8.0, 12.0 - leg_offset, color);
@@ -239,6 +248,7 @@ async fn main() {
     };
 
     let mut enemies: Vec<Enemy> = Vec::new();
+    let mut particles: Vec<Particle> = Vec::new();
     let mut power_up: Option<Vec2> = None;
     let mut power_up_spawned_this_level = false;
     let mut level = 1;
@@ -251,6 +261,8 @@ async fn main() {
     let render_target = render_target(VIRTUAL_WIDTH as u32, VIRTUAL_HEIGHT as u32);
     render_target.texture.set_filter(FilterMode::Nearest);
 
+    let stage_music = load_sound("stagemusic.wav").await.expect("Failed to load music");
+
     loop {
         let dt = get_frame_time();
         anim_time += dt;
@@ -259,12 +271,19 @@ async fn main() {
             GameState::Start => {
                 if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
                     state = GameState::Playing;
+                    play_sound(stage_music, PlaySoundParams { looped: true, volume: 1.0 });
                 }
             }
             GameState::Playing => {
                 level_timer += dt;
                 run_timer += dt;
                 if player.powerup_timer > 0.0 { player.powerup_timer -= dt; }
+
+                particles.retain_mut(|p| {
+                    p.pos += p.vel * dt;
+                    p.life -= dt;
+                    p.life > 0.0
+                });
 
                 if level_timer >= 30.0 {
                     level += 1;
@@ -450,6 +469,7 @@ async fn main() {
                         player.invincibility_timer = 1.0;
                     }
                     if player.health <= 0.0 {
+                        stop_sound(stage_music);
                         if high_scores.iter().any(|s| player.score > s.score) || high_scores.len() < 5 {
                             state = GameState::EnteringName;
                             player_name = vec!['A', 'A', 'A'];
@@ -459,6 +479,20 @@ async fn main() {
                         }
                         selected_menu = 0;
                     }
+
+                    if e.health <= 0.0 && e.enemy_type == EnemyType::Heli {
+                        let colors = [GOOGLE_RED, SUNSET_ORANGE, NEON_YELLOW, WHITE];
+                        for _ in 0..15 {
+                            particles.push(Particle {
+                                pos: e.pos + vec2(20.0, 20.0),
+                                vel: vec2(rand::gen_range(-200.0, 200.0), rand::gen_range(-200.0, 200.0)),
+                                life: rand::gen_range(0.5, 1.2),
+                                color: colors[rand::gen_range(0, colors.len())],
+                                size: rand::gen_range(3.0, 8.0),
+                            });
+                        }
+                    }
+
                     e.health > 0.0 && e.pos.x > -200.0
                 });
 
@@ -500,6 +534,7 @@ async fn main() {
                         player.score = 0;
                         player.bullets.clear();
                         enemies.clear();
+                        particles.clear();
                         level = 1;
                         level_timer = 0.0;
                         run_timer = 0.0;
@@ -507,6 +542,7 @@ async fn main() {
                         power_up_spawned_this_level = false;
                         player.powerup_timer = 0.0;
                         state = GameState::Playing;
+                        play_sound(stage_music, PlaySoundParams { looped: true, volume: 1.0 });
                     } else {
                         std::process::exit(0);
                     }
@@ -550,7 +586,7 @@ async fn main() {
 
         for e in &enemies {
             match e.enemy_type {
-                EnemyType::Dino => draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer, 0.0),
+                EnemyType::Dino => draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer, 0.0, None),
                 EnemyType::Heli => draw_heli(e.pos + camera_offset, 40.0, e.color, e.anim_timer),
                 EnemyType::FlippingDino => {
                     let rotation = if e.pos.y < VIRTUAL_HEIGHT - GROUND_Y - 40.0 {
@@ -558,9 +594,15 @@ async fn main() {
                     } else {
                         0.0
                     };
-                    draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer, rotation);
+                    draw_chrome_dino(e.pos + camera_offset, 38.0, e.color, e.anim_timer, rotation, Some(BLACK));
                 }
             }
+        }
+
+        for p in &particles {
+            let mut c = p.color;
+            c.a = p.life.min(1.0);
+            draw_circle(p.pos.x + camera_offset.x, p.pos.y + camera_offset.y, p.size, c);
         }
 
         if let Some(pu_pos) = power_up {
