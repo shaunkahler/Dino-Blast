@@ -261,7 +261,7 @@ async fn main() {
     let render_target = render_target(VIRTUAL_WIDTH as u32, VIRTUAL_HEIGHT as u32);
     render_target.texture.set_filter(FilterMode::Nearest);
 
-    let stage_music = load_sound("stagemusic.wav").await.expect("Failed to load music");
+    let stage_music = load_sound("stagemusic.ogg").await.expect("Failed to load music");
 
     loop {
         let dt = get_frame_time();
