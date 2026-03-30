@@ -9,6 +9,8 @@ COPY serve.py .
 
 # Optional assets
 COPY dinoblast.png .
+COPY stagemusic.ogg .
+COPY high_scores.txt .
 
 EXPOSE 8080
 

@@ -183,6 +183,7 @@ fn draw_dino_guy(pos: Vec2, anim: f32, is_grounded: bool, aim_dir: Vec2, powerup
 #[derive(PartialEq)]
 enum GameState {
     Start,
+    GetReady,
     Playing,
     GameOver,
     EnteringName,
@@ -269,18 +270,42 @@ async fn main() {
 
     let stage_music = load_sound("stagemusic.ogg").await.expect("Failed to load music");
 
+    // Pre-start audio context wake-up on first frame interaction
+    let mut music_playing = false;
+    let mut get_ready_timer = 0.0;
+
     loop {
         let dt = get_frame_time();
         anim_time += dt;
 
         match state {
             GameState::Start => {
-                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
-                    state = GameState::Playing;
+                if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) || is_mouse_button_pressed(MouseButton::Left) {
+                    state = GameState::GetReady;
+                    get_ready_timer = 2.0;
+                    music_playing = false;
+                }
+            }
+            GameState::GetReady => {
+                get_ready_timer -= dt;
+                
+                // Wait 0.5 seconds into the GetReady phase to ensure AudioContext is fully running
+                if !music_playing && get_ready_timer <= 1.5 {
                     play_sound(stage_music, PlaySoundParams { looped: true, volume: 1.0 });
+                    music_playing = true;
+                }
+                
+                if get_ready_timer <= 0.0 {
+                    state = GameState::Playing;
                 }
             }
             GameState::Playing => {
+                // Music is already started in GetReady
+                if !music_playing {
+                    play_sound(stage_music, PlaySoundParams { looped: true, volume: 1.0 });
+                    music_playing = true;
+                }
+
                 level_timer += dt;
                 run_timer += dt;
                 if player.powerup_timer > 0.0 { player.powerup_timer -= dt; }
@@ -346,12 +371,11 @@ async fn main() {
                 let virtual_mouse = vec2((mouse_pos.0 - offset_x) / scale, (mouse_pos.1 - offset_y) / scale);
                 let gun_center = player.pos + vec2(20.0, 20.0);
                 
-                if is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right) {
-                    player.aim_dir = (virtual_mouse - gun_center).normalize();
-                }
+                // Always shoot forward (right)
+                player.aim_dir = vec2(1.0, 0.0);
 
                 player.shoot_timer -= dt;
-                let is_shooting = is_mouse_button_down(MouseButton::Left) || is_key_down(KeyCode::J) || is_key_down(KeyCode::K);
+                let is_shooting = is_key_down(KeyCode::J) || is_key_down(KeyCode::K);
                 if is_shooting {
                     if player.shoot_timer <= 0.0 {
                         let is_gmail = rand::gen_range(0, 5) == 0;
@@ -476,6 +500,7 @@ async fn main() {
                     }
                     if player.health <= 0.0 {
                         stop_sound(stage_music);
+                        music_playing = false;
                         if high_scores.iter().any(|s| player.score > s.score) || high_scores.len() < 5 {
                             state = GameState::EnteringName;
                             player_name = vec!['A', 'A', 'A'];
@@ -547,8 +572,9 @@ async fn main() {
                         power_up = None;
                         power_up_spawned_this_level = false;
                         player.powerup_timer = 0.0;
-                        state = GameState::Playing;
-                        play_sound(stage_music, PlaySoundParams { looped: true, volume: 1.0 });
+                        state = GameState::GetReady;
+                        get_ready_timer = 2.0;
+                        music_playing = false;
                     } else {
                         std::process::exit(0);
                     }
@@ -626,7 +652,8 @@ async fn main() {
             GameState::Start => {
                 draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.7));
                 draw_text("DINO BLAST", VIRTUAL_WIDTH/2.0 - 180.0, 150.0, 80.0, NEON_PINK);
-                draw_text("PRESS START (ENTER)", VIRTUAL_WIDTH/2.0 - 150.0, 220.0, 30.0, WHITE);
+                draw_text("PRESS START", VIRTUAL_WIDTH/2.0 - 80.0, 220.0, 30.0, WHITE);
+
                 
                 draw_text("HIGH SCORES", VIRTUAL_WIDTH/2.0 - 80.0, 300.0, 32.0, NEON_CYAN);
                 for (i, s) in high_scores.iter().enumerate() {
@@ -662,6 +689,10 @@ async fn main() {
                 let exit_color = if selected_menu == 1 { NEON_YELLOW } else { WHITE };
                 draw_text("TRY AGAIN", VIRTUAL_WIDTH/2.0 - 80.0, 520.0, 40.0, try_color);
                 draw_text("EXIT", VIRTUAL_WIDTH/2.0 - 40.0, 580.0, 40.0, exit_color);
+            }
+            GameState::GetReady => {
+                draw_rectangle(0.0, 0.0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, Color::new(0.0, 0.0, 0.0, 0.5));
+                draw_text("GET READY...", VIRTUAL_WIDTH/2.0 - 150.0, VIRTUAL_HEIGHT/2.0, 60.0, NEON_YELLOW);
             }
             _ => {}
         }

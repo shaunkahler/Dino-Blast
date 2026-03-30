@@ -1,0 +1,9 @@
+@echo off
+echo Building project for WebAssembly...
+cargo build --target wasm32-unknown-unknown --release
+
+echo Copying WASM binary to project root...
+copy target\wasm32-unknown-unknown\release\dino-blast.wasm dino_blast.wasm
+
+echo Starting local server at http://localhost:8080...
+python serve.py

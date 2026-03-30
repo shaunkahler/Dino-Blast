@@ -60,8 +60,8 @@
         .action-buttons { right: 20px; }
 
         .btn {
-            width: 60px;
-            height: 60px;
+            width: 80px;
+            height: 80px;
             background: rgba(255, 255, 255, 0.3);
             border: 2px solid rgba(255, 255, 255, 0.6);
             border-radius: 50%;
@@ -71,9 +71,32 @@
             color: white;
             font-family: Arial, sans-serif;
             font-weight: bold;
-            font-size: 24px;
+            font-size: 32px;
             user-select: none;
             -webkit-user-select: none;
+        }
+
+        #fullscreen-btn {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            border-radius: 8px;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        #fullscreen-btn:active {
+            background: rgba(255, 255, 255, 0.6);
         }
         
         .btn:active {
@@ -117,7 +140,8 @@
             }
             .mobile-controls-active #glcanvas {
                 width: auto;
-                height: 85%;
+                height: 95%;
+                max-width: calc(100vw - 400px); /* Ensures canvas never overlaps buttons on the left/right */
                 aspect-ratio: 4 / 3;
                 border: 2px solid #222;
                 border-radius: 8px;
@@ -138,8 +162,8 @@
                 transform: translateY(50%);
                 pointer-events: auto; /* Re-enable touches for buttons */
             }
-            .mobile-controls-active .d-pad { left: 40px; }
-            .mobile-controls-active .action-buttons { right: 40px; }
+            .mobile-controls-active .d-pad { left: 15px; }
+            .mobile-controls-active .action-buttons { right: 15px; }
         }
     </style>
 </head>
@@ -147,6 +171,7 @@
 <body>
     <div id="game-container">
         <canvas id="glcanvas" tabindex='1'></canvas>
+        <div id="fullscreen-btn">⛶</div>
         <div id="controls">
             <div class="d-pad">
                 <div class="btn" id="btn-left">←</div>
@@ -160,6 +185,20 @@
     </div>
     
     <script>
+        // Fullscreen logic
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+
         // Check if device is mobile (touch screen)
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
         
@@ -183,18 +222,36 @@
 
             function bindBtn(id, code, keyCode) {
                 const btn = document.getElementById(id);
-                btn.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
+                
+                // Track interaction state
+                let isPressed = false;
+
+                const startHandler = (e) => {
+                    if (isPressed) return;
+                    isPressed = true;
+                    
+                    // CRITICAL: Unblock audio context IMMEDIATELY on the very first touch
+                    unblock();
+                    
+                    if (e.cancelable) e.preventDefault();
                     sendKey('keydown', code, keyCode);
-                }, { passive: false });
-                btn.addEventListener('touchend', (e) => {
-                    e.preventDefault();
+                };
+
+                const endHandler = (e) => {
+                    if (!isPressed) return;
+                    isPressed = false;
+                    if (window.mq_audio_unlocked && e.cancelable) e.preventDefault();
                     sendKey('keyup', code, keyCode);
-                }, { passive: false });
-                btn.addEventListener('touchcancel', (e) => {
-                    e.preventDefault();
-                    sendKey('keyup', code, keyCode);
-                }, { passive: false });
+                };
+
+                // Listen to both Touch and Mouse to cover all mobile/tablet edge cases
+                btn.addEventListener('touchstart', startHandler, { passive: false });
+                btn.addEventListener('touchend', endHandler, { passive: false });
+                btn.addEventListener('touchcancel', endHandler, { passive: false });
+                
+                btn.addEventListener('mousedown', startHandler);
+                btn.addEventListener('mouseup', endHandler);
+                btn.addEventListener('mouseleave', endHandler);
             }
 
             bindBtn('btn-left', 'ArrowLeft', 37);
@@ -207,8 +264,32 @@
     <!-- Miniquad library required to bootstrap WASM -->
     <script src="mq_js_bundle.js"></script>
     <script>
-        // Load the actual wasm file
-        load("dino_blast.wasm");
+        // Load the actual wasm file with a cache buster and explicit audio context resume on click
+        load("dino_blast.wasm?v=" + new Date().getTime());
+        
+        // Global listener to resume audio context if it's stuck in suspended state
+        let audio_unblocked = false;
+        function unblock() {
+            if (audio_unblocked) return;
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                const context = new AudioContext();
+                // Create a silent buffer and play it to force-resume the audio session
+                const buffer = context.createBuffer(1, 1, 22050);
+                const source = context.createBufferSource();
+                source.buffer = buffer;
+                source.connect(context.destination);
+                source.start(0);
+                if (context.state === 'suspended') {
+                    context.resume();
+                }
+                audio_unblocked = true;
+            }
+        }
+        
+        ['click', 'keydown', 'touchstart', 'mousedown', 'touchend'].forEach(evt => {
+            document.addEventListener(evt, unblock, { once: true });
+        });
     </script>
 </body>
 
