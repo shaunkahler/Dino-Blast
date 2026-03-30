@@ -4,4 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-macroquad = { version = "0.3.25", features = ["audio"] }
+macroquad = "0.3"
+
+[profile.release]
+opt-level = "z"
+lto = true

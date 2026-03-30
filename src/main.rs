@@ -194,37 +194,43 @@ struct HighScore {
 }
 
 fn load_scores() -> Vec<HighScore> {
-    if let Ok(content) = std::fs::read_to_string("high_scores.txt") {
-        content.lines()
-            .filter_map(|l| {
-                let parts: Vec<&str> = l.split(',').collect();
-                if parts.len() == 2 {
-                    Some(HighScore { name: parts[0].to_string(), score: parts[1].parse().unwrap_or(0) })
-                } else { None }
-            })
-            .collect()
-    } else {
-        vec![
-            HighScore { name: "ACE".to_string(), score: 5000 },
-            HighScore { name: "NEO".to_string(), score: 3500 },
-            HighScore { name: "FLY".to_string(), score: 2000 },
-            HighScore { name: "REX".to_string(), score: 1000 },
-            HighScore { name: "BOB".to_string(), score: 500 },
-        ]
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Ok(content) = std::fs::read_to_string("high_scores.txt") {
+            return content.lines()
+                .filter_map(|l| {
+                    let parts: Vec<&str> = l.split(',').collect();
+                    if parts.len() == 2 {
+                        Some(HighScore { name: parts[0].to_string(), score: parts[1].parse().unwrap_or(0) })
+                    } else { None }
+                })
+                .collect();
+        }
     }
+    vec![
+        HighScore { name: "ACE".to_string(), score: 5000 },
+        HighScore { name: "NEO".to_string(), score: 3500 },
+        HighScore { name: "FLY".to_string(), score: 2000 },
+        HighScore { name: "REX".to_string(), score: 1000 },
+        HighScore { name: "BOB".to_string(), score: 500 },
+    ]
 }
 
 fn save_scores(scores: &[HighScore]) {
-    let content = scores.iter()
+    let _content = scores.iter()
         .map(|s| format!("{},{}", s.name, s.score))
         .collect::<Vec<_>>()
         .join("\n");
-    let _ = std::fs::write("high_scores.txt", content);
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = std::fs::write("high_scores.txt", _content);
+    }
 }
 
 #[macroquad::main("Dino Blast")]
 async fn main() {
-    set_fullscreen(true);
+    
     let mut state = GameState::Start;
     let mut high_scores = load_scores();
     let mut player_name = vec!['A', 'A', 'A'];
