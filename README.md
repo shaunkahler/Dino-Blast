@@ -39,4 +39,4 @@ cargo run
 
 ## Credits
 
-Developed as a "Miami Pixel Google Shooter EXTREME" prototype using the Macroquad engine.
+Developed for that Miami Google Hackathon in Jan 2026 where *Sergei Brin actually showed up*.
